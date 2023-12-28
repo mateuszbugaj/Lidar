@@ -1,29 +1,41 @@
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 
-static void gpio_setup(void) {
+extern void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
 
-	/* Enable GPIOC clock. */
-	rcc_periph_clock_enable(RCC_GPIOC);
-
-	/* Set GPIO8 (in GPIO port C) to 'output push-pull'. */
-	gpio_set_mode(GPIOC,GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL,GPIO13);
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
+	for(;;);	// Loop forever here..
 }
 
-int main(void) {
-	int i;
+static void
+task1(void *args __attribute((unused))) {
 
-	gpio_setup();
-
-	while (true) {
-		gpio_clear(GPIOC,GPIO13);	/* LED on */
-		for (i = 0; i < 1500000; i++)	/* Wait a bit. */
-			__asm__("nop");
-
-		gpio_set(GPIOC,GPIO13);		/* LED off */
-		for (i = 0; i < 500000; i++)	/* Wait a bit. */
-			__asm__("nop");
+	for (;;) {
+		gpio_toggle(GPIOC,GPIO13);
+		vTaskDelay(pdMS_TO_TICKS(500));
 	}
+}
 
+int
+main(void) {
+
+	rcc_clock_setup_in_hse_8mhz_out_72mhz(); // For "blue pill"
+
+	rcc_periph_clock_enable(RCC_GPIOC);
+	gpio_set_mode(
+		GPIOC,
+		GPIO_MODE_OUTPUT_2_MHZ,
+		GPIO_CNF_OUTPUT_PUSHPULL,
+		GPIO13);
+
+	xTaskCreate(task1,"LED",1000,NULL,configMAX_PRIORITIES-1,NULL);
+	vTaskStartScheduler();
+
+	for (;;);
 	return 0;
 }
+
+// End
