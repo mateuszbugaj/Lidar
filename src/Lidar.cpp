@@ -4,10 +4,12 @@
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 
-extern void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
-	for(;;);	// Loop forever here..
+	(void)xTask;
+	(void)pcTaskName;
+	for(;;);
 }
 
 static void
@@ -15,14 +17,14 @@ task1(void *args __attribute((unused))) {
 
 	for (;;) {
 		gpio_toggle(GPIOC,GPIO13);
-		vTaskDelay(pdMS_TO_TICKS(500));
+		vTaskDelay(pdMS_TO_TICKS(100));
 	}
 }
 
 int
 main(void) {
 
-	rcc_clock_setup_in_hse_8mhz_out_72mhz(); // For "blue pill"
+	rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE8_72MHZ]); // For "blue pill"
 
 	rcc_periph_clock_enable(RCC_GPIOC);
 	gpio_set_mode(
@@ -31,7 +33,7 @@ main(void) {
 		GPIO_CNF_OUTPUT_PUSHPULL,
 		GPIO13);
 
-	xTaskCreate(task1,"LED",1000,NULL,configMAX_PRIORITIES-1,NULL);
+	xTaskCreate(task1,"LED",100,NULL,configMAX_PRIORITIES-1,NULL);
 	vTaskStartScheduler();
 
 	for (;;);

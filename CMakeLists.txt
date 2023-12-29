@@ -6,5 +6,5 @@ project(
   LANGUAGES C CXX)
 
 message("C compiler: " ${CMAKE_C_COMPILER} ", C++ compiler: " ${CMAKE_CXX_COMPILER})
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/blue-pill.cmake)
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src)
+include(${PROJECT_SOURCE_DIR}/cmake/blue-pill.cmake)
+add_subdirectory(${PROJECT_SOURCE_DIR}/src)
