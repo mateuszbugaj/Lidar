@@ -9,8 +9,8 @@ set(FREERTOS_HEAP "4" CACHE STRING "" FORCE)
 set(FREERTOS_PORT "GCC_ARM_CM3" CACHE STRING "" FORCE)
 add_subdirectory(${FREERTOS_KERNEL_PATH} FreeRTOS-Kernel)
 
-add_executable(Lidar Lidar.cpp opencm3.c)
 
+add_executable(Lidar Lidar.cpp opencm3.c uart_lib.h)
 add_dependencies(Lidar libopencm3)
 target_link_libraries(Lidar ${LIBOPENCM3_BLUEPILL_LIBRARIES} freertos_kernel freertos_config)
 

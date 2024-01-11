@@ -6,80 +6,89 @@
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/usart.h>
 
-static QueueHandle_t uart_txq;		// TX queue for UART
-static uint16_t timer_counter = 0;
-
-static void uart_setup(void) {
-	rcc_periph_clock_enable(RCC_GPIOA);
-	rcc_periph_clock_enable(RCC_USART1);
-
-	// UART TX on PA9 (GPIO_USART1_TX)
-	gpio_set_mode(GPIOA,
-		GPIO_MODE_OUTPUT_50_MHZ,
-		GPIO_CNF_OUTPUT_ALTFN_PUSHPULL,
-		GPIO_USART1_TX);
-
-	usart_set_baudrate(USART1,38400);
-	usart_set_databits(USART1,8);
-	usart_set_stopbits(USART1,USART_STOPBITS_1);
-	usart_set_mode(USART1,USART_MODE_TX);
-	usart_set_parity(USART1,USART_PARITY_NONE);
-	usart_set_flow_control(USART1,USART_FLOWCONTROL_NONE);
-	usart_enable(USART1);
-
-	// Create a queue for data to transmit from UART
-	uart_txq = xQueueCreate(256,sizeof(char));
+extern "C"{
+	#include "uart_lib.h"
 }
 
-static void uart_task(void *args __attribute__((unused))) {
-	char ch;
+#define COIL_NUMBER 4
 
+struct Pin {
+	uint32_t gpioport;
+	uint16_t gpios;
+};
+
+struct StepperMotor {
+	Pin coils[COIL_NUMBER];
+	const uint8_t phases[8] {1, 3, 2, 6, 4, 12, 8, 9};
+	int8_t lastPhase;
+};
+
+void stepperMotorInit(StepperMotor& sm){
+	for(uint8_t i = 0; i < COIL_NUMBER; i++){
+		gpio_set_mode(
+			sm.coils[i].gpioport,
+			GPIO_MODE_OUTPUT_2_MHZ,
+			GPIO_CNF_OUTPUT_PUSHPULL,
+			sm.coils[i].gpios
+		);
+
+		gpio_clear(sm.coils[i].gpioport, sm.coils[i].gpios);
+	}
+}
+
+void demoTask(void *args __attribute__((unused))) {
+	uint16_t counter = 0;
 	for (;;) {
-		// Receive char to be TX
-		if ( xQueueReceive(uart_txq,&ch,500) == pdPASS ) {
-			while ( !usart_get_flag(USART1,USART_SR_TXE) )
-				taskYIELD();	// Yield until ready
-			usart_send(USART1,ch);
-		}
-	}
-}
-
-static void uart_puts(const char *s) {
-	for ( ; *s; ++s ) {
-		xQueueSend(uart_txq,s,portMAX_DELAY); 
-	}
-}
-
-static void uart_putn(uint16_t n) {
-	char buff[10] {0};
-	uint8_t digitNumber = 0;
-
-	while(n > 0){
-		char c = n % 10 + '0';
-		buff[digitNumber++] = c;
-
-		n /= 10;
-	}
-
-	while(digitNumber > 0){
-		xQueueSend(uart_txq,&buff[digitNumber-1],portMAX_DELAY);
-		digitNumber--;
-	}
-}
-
-static void demo_task(void *args __attribute__((unused))) {
-	for (;;) {
-		uart_putn(timer_counter);
+		uart_putn(counter++);
 		uart_puts("\n\r");
-		timer_counter++;
 
 		gpio_toggle(GPIOC,GPIO13);
-		vTaskDelay(pdMS_TO_TICKS(10));
+		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
 }
 
+void decimalToBinary(int value, int digits, uint8_t *arr) {
+	for (int i = 0; value > 0; i++) {
+		arr[i] = value % 2;
+		value /= 2;
+		digits--;
+	}
+}
+
+void stepperMotorTask(void* args){
+	StepperMotor* motor = (StepperMotor*) args;
+
+	uint8_t dir = 1;
+	uint16_t steps = 1000;
+	for(;;){
+		for(int step = 0; step < steps; step++){
+			uint8_t c[COIL_NUMBER] = {0};
+			motor->lastPhase += dir;
+
+			if(motor->lastPhase == 8) motor->lastPhase = 0;
+			if(motor->lastPhase == -1) motor->lastPhase = 7;
+
+			decimalToBinary(motor->phases[motor->lastPhase], COIL_NUMBER, c);
+
+			for(uint8_t coilNumber = 0; coilNumber < COIL_NUMBER; coilNumber++){
+				if(c[coilNumber]){
+					gpio_set(motor->coils[coilNumber].gpioport, motor->coils[coilNumber].gpios);
+				} else {
+					gpio_clear(motor->coils[coilNumber].gpioport, motor->coils[coilNumber].gpios); // ERROR
+				}
+			}
+
+			vTaskDelay(pdMS_TO_TICKS(10));
+		}
+
+		dir *= -1;
+	}
+}
+
+StepperMotor motor1, motor2;
+
 int main(void) {
-	rcc_clock_setup_in_hse_8mhz_out_72mhz();	// CPU clock is 72 MHz
+	rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE8_72MHZ]);	// CPU clock is 72 MHz
 
 	// GPIO PC13:
 	rcc_periph_clock_enable(RCC_GPIOC);
@@ -89,10 +98,46 @@ int main(void) {
 		GPIO_CNF_OUTPUT_PUSHPULL,
 		GPIO13);
 
+	rcc_periph_clock_enable(RCC_GPIOB);
+
+	motor1.coils[0].gpioport = GPIOB;
+	motor1.coils[0].gpios = GPIO12;
+
+	motor1.coils[1].gpioport = GPIOB;
+	motor1.coils[1].gpios = GPIO13;
+
+	motor1.coils[2].gpioport = GPIOB;
+	motor1.coils[2].gpios = GPIO14;
+
+	motor1.coils[3].gpioport = GPIOB;
+	motor1.coils[3].gpios = GPIO15;
+
+	stepperMotorInit(motor1);
+
+	motor2.coils[0].gpioport = GPIOB;
+	motor2.coils[0].gpios = GPIO6;
+
+	motor2.coils[1].gpioport = GPIOB;
+	motor2.coils[1].gpios = GPIO7;
+
+	motor2.coils[2].gpioport = GPIOB;
+	motor2.coils[2].gpios = GPIO8;
+
+	motor2.coils[3].gpioport = GPIOB;
+	motor2.coils[3].gpios = GPIO9;
+
+	stepperMotorInit(motor2);
+
 	uart_setup();
 
-	xTaskCreate(uart_task,"UART",100,NULL,configMAX_PRIORITIES-1,NULL);
-	xTaskCreate(demo_task,"DEMO",100,NULL,configMAX_PRIORITIES-1,NULL);
+	
+	xTaskCreate(uartTask,"UART",100,NULL,configMAX_PRIORITIES-1,NULL);
+	xTaskCreate(demoTask,"DEMO",100,NULL,configMAX_PRIORITIES-1,NULL);
+
+	uart_puts("Start...\n\r");
+
+	BaseType_t sm1Result = xTaskCreate(stepperMotorTask, "SM1", 100, (void*) &motor1, configMAX_PRIORITIES-1, NULL);
+	// BaseType_t sm2Result = xTaskCreate(stepperMotorTask, "SM2", 100, (void*) &motor2, configMAX_PRIORITIES-1, NULL);
 
 	vTaskStartScheduler();
 	for (;;);
