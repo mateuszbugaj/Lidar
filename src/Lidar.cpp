@@ -59,9 +59,9 @@ void stepperMotorTask(void* args){
 	for(;;){
 		for(int step = 0; step < steps; step++){
 			gpio_set(motor->step.gpioport, motor->step.gpios);
-			vTaskDelay(pdMS_TO_TICKS(5));
+			vTaskDelay(pdMS_TO_TICKS(1));
 			gpio_clear(motor->step.gpioport, motor->step.gpios);
-			vTaskDelay(pdMS_TO_TICKS(5));
+			vTaskDelay(pdMS_TO_TICKS(1));
 		}
 
 		gpio_toggle(motor->dir.gpioport, motor->dir.gpios);
