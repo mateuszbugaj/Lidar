@@ -18,6 +18,7 @@ extern "C"{
 #define AS5600_ANGLE_H 0x0D
 
 static uint32_t i2c1 = I2C1;
+static uint32_t i2c2 = I2C2;
 
 struct Pin {
 	uint32_t gpioport;
@@ -65,33 +66,40 @@ uint8_t readAS5600Status(){
 	uart_putn((status & (1 << 4) >> 4));
 	uart_puts(" | ");
 	uart_putn((status & (1 << 3) >> 3));
-	uart_puts("\n\r");
+	uart_puts(" | ");
 
 	return status;
 }
 
-void readingRotationTask(void *args __attribute__((unused))) {
-	uint16_t counter = 0;
+void readingRotationTask(void* args) {
+	uint32_t i2c = *((uint32_t*) args);
 
+	uint16_t counter = 0;
 	uint8_t addr = AS5600_ADDR;
 	volatile uint16_t angleValue = 0;
 
 	for (;;) {
-		uart_putn(counter++);
+		if(i2c == i2c1)
+			uart_puts("I2C1");
+		else if(i2c == i2c2)
+			uart_puts("I2C2");
+		else
+			uart_puts("I2C?");
+		
 		uart_puts(": ");
 
 		// (void) readAS5600Status();
 
 		// read rotation angle
-		i2c_start_addr(I2C1,addr,Write);
-		i2c_write_read(I2C1, addr, AS5600_ANGLE_L);
-		uint8_t byte_1 = i2c_read(I2C1, true);
-		i2c_stop(I2C1);
+		i2c_start_addr(i2c,addr,Write);
+		i2c_write_read(i2c, addr, AS5600_ANGLE_L);
+		uint8_t byte_1 = i2c_read(i2c, true);
+		i2c_stop(i2c);
 
-		i2c_start_addr(I2C1,addr,Write);
-		i2c_write_read(I2C1, addr, AS5600_ANGLE_H);
-		uint8_t byte_2 = i2c_read(I2C1, true);
-		i2c_stop(I2C1);
+		i2c_start_addr(i2c,addr,Write);
+		i2c_write_read(i2c, addr, AS5600_ANGLE_H);
+		uint8_t byte_2 = i2c_read(i2c, true);
+		i2c_stop(i2c);
 
 		angleValue = (byte_1 << 8) | byte_2;
 		angleValue = angleValue * 360 / 4096;
@@ -154,11 +162,20 @@ int main(void) {
 		GPIO_CNF_OUTPUT_ALTFN_OPENDRAIN,
 		GPIO_I2C1_SCL | GPIO_I2C1_SDA);
 		
-	i2c_setup(I2C1);
+	i2c_setup(i2c1);
+
+	rcc_periph_clock_enable(RCC_I2C2);
+	gpio_set_mode(GPIOB,
+		GPIO_MODE_OUTPUT_50_MHZ,
+		GPIO_CNF_OUTPUT_ALTFN_OPENDRAIN,
+		GPIO_I2C2_SCL | GPIO_I2C2_SDA);
+		
+	i2c_setup(i2c2);
 
 	uart_puts("Start...\n\r");
 	xTaskCreate(uartTask,"UART",100,NULL,configMAX_PRIORITIES-1,NULL);
-	xTaskCreate(readingRotationTask,"READING",800,NULL,configMAX_PRIORITIES-1,NULL);
+	xTaskCreate(readingRotationTask,"READING_ALPHA",800, (void*) &i2c1,configMAX_PRIORITIES-1,NULL);
+	xTaskCreate(readingRotationTask,"READING_BETA",800, (void*) &i2c2,configMAX_PRIORITIES-1,NULL);
 	xTaskCreate(stepperMotorTask, "SM1", 100, (void*) &motor1, configMAX_PRIORITIES-1, NULL);
 
 	vTaskStartScheduler();
