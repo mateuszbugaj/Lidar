@@ -19,6 +19,12 @@ static void uart_setup(void) {
 		GPIO_CNF_OUTPUT_ALTFN_PUSHPULL,
 		GPIO_USART1_TX);
 
+	// UART RX on PA10 (GPIO_USART1_RX)
+	gpio_set_mode(GPIOA,
+		GPIO_MODE_INPUT,
+		GPIO_CNF_INPUT_FLOAT,
+		GPIO_USART1_RX);
+
 	usart_set_baudrate(USART1,38400);
 	usart_set_databits(USART1,8);
 	usart_set_stopbits(USART1,USART_STOPBITS_1);
@@ -50,8 +56,14 @@ static void uart_puts(const char *s) {
 	}
 }
 
-static void uart_putn(uint32_t n) {
+static void uart_putn(int32_t n) {
+	bool negative  = n < 0;
+	if(negative){
+		n *= -1;
+	}
+
 	char buff[10] = {'0'};
+	char minusSign = '-';
 	uint8_t digitNumber = 0;
 
 	if(n == 0) digitNumber = 1;
@@ -61,6 +73,10 @@ static void uart_putn(uint32_t n) {
 		buff[digitNumber++] = c;
 
 		n /= 10;
+	}
+
+	if(negative){
+		xQueueSend(uart_txq,&minusSign,portMAX_DELAY);
 	}
 
 	while(digitNumber > 0){
