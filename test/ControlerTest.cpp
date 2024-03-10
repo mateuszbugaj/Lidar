@@ -56,3 +56,45 @@ TEST(ControlerTest, getDegreeDiffHalf_2){
 
   EXPECT_EQ(getDegreeDiff(pos, target), expectedDifference);
 }
+
+TEST(ControllerTest, generatePoints_corners) {
+  int width = 70;
+  int height = 30;
+  int resolution = 10;
+  int initialAlpha = 33;
+  int initialBeta = 58;
+
+  Point point{initialAlpha, initialBeta};
+  int counter = 0;
+
+  Point prevPoint;
+  prevPoint.alphaDegrees = point.alphaDegrees;
+  prevPoint.betaDegrees = point.betaDegrees;
+
+  std::vector<int> expectedAlphaDiff = {
+    -30, 10, 10, 10, 10, 10, 10,
+    -60, 10, 10, 10, 10, 10, 10,
+    -60, 10, 10, 10, 10, 10, 10
+  };
+
+  std::vector<int> expectedBetaDiff = {
+    10, 0, 0, 0, 0, 0, 0,
+    -10, 0, 0, 0, 0, 0, 0,
+    -10, 0, 0, 0, 0, 0, 0
+  };
+
+  for (int i = 0; i < 21; i++) {
+    Point prevPoint;
+
+    prevPoint.alphaDegrees = point.alphaDegrees;
+    prevPoint.betaDegrees = point.betaDegrees;
+
+    generatePoint(i, point, width, height, resolution);
+
+    EXPECT_EQ(point.alphaDegrees - prevPoint.alphaDegrees, expectedAlphaDiff[i]);
+    EXPECT_EQ(point.betaDegrees - prevPoint.betaDegrees, expectedBetaDiff[i]);
+    counter++;
+  }
+
+}
+

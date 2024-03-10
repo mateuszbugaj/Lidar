@@ -11,7 +11,9 @@ add_subdirectory(${FREERTOS_KERNEL_PATH} FreeRTOS-Kernel)
 
 add_executable(Lidar Lidar.cpp opencm3.c uart_lib.h i2c.c i2c.h Controler.hpp)
 add_dependencies(Lidar libopencm3)
-target_link_libraries(Lidar ${LIBOPENCM3_BLUEPILL_LIBRARIES} freertos_kernel freertos_config)
+
+target_link_libraries(Lidar ${LIBOPENCM3_BLUEPILL_LIBRARIES} freertos_kernel freertos_config VL53L0X)
+target_include_directories(Lidar PRIVATE ${PROJECT_SOURCE_DIR}/lib/VL53L0X)
 
 add_bin_from_elf(Lidar.bin Lidar)
 add_stlink_upload_target(Lidar.bin)

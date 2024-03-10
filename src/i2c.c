@@ -129,3 +129,21 @@ void i2c_write_read(uint32_t dev, uint8_t addr, uint8_t byte) {
 void i2c_stop(uint32_t dev) { 
 	i2c_send_stop(dev); 
 }
+
+uint8_t i2c_readN(uint32_t dev, uint8_t slave_address, uint8_t* data, uint8_t N){
+	i2c_start_addr(dev, slave_address, Read);
+	for (uint8_t i = 0; i < N; i++){
+		data[i] = i2c_read(dev, i == N-1);
+	}
+	i2c_stop(dev);
+	return 0;
+}
+
+uint8_t i2c_writeN(uint32_t dev, uint8_t slave_address, uint8_t* data, uint8_t N){
+	i2c_start_addr(dev, slave_address, Write);
+	for (uint8_t i = 0; i < N; i++){
+		i2c_write(dev, data[i]);
+	}
+	i2c_stop(dev);
+	return 0;
+}

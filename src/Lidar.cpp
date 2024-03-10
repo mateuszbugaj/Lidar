@@ -16,6 +16,7 @@
 extern "C"{
 	#include "uart_lib.h"
 	#include "i2c.h"
+	#include "VL53L0X.h"
 }
 
 /*
@@ -72,11 +73,6 @@ struct StepperMotor {
 	int stepsToMove;
 };
 
-struct Point {
-	int16_t alphaDegrees;
-	int16_t betaDegrees;
-};
-
 struct ReadingTaskData {
 	uint32_t i2c;
 	SemaphoreHandle_t* signal;
@@ -86,6 +82,14 @@ struct ReadingTaskData {
 struct StepperMotorTaskData {
 	StepperMotor* motorAlpha;
 	StepperMotor* motorBeta;
+};
+
+struct VL53L0X myTOFsensor = {
+	.i2c = I2C1,
+	.io_2v8 = true, 
+	.address = 0b0101001, 
+	.io_timeout = 500, 
+	.did_timeout = false
 };
 
 static ReadingTaskData 
@@ -100,10 +104,12 @@ static SemaphoreHandle_t
 	readAlphaPositionSignal, 
 	readBetaPositionSignal, 
 	readAlphaSensorStatusSignal, 
-	readBetaSensorStatusSignal;
+	readBetaSensorStatusSignal,
+	readDistanceSignal;
 
 static QueueHandle_t movementQueue;
 static Point currentPosition;
+static int16_t currentDistance;
 static int16_t currentAlphaSensorStatus, currentBetaSensorStatus;
 
 void stepperMotorInit(StepperMotor& sm){
@@ -198,6 +204,56 @@ void readingRotationTask(void* args) {
 	}
 }
 
+int mapOneRangeToAnother(double sourceNumber, double fromA, double fromB, double toA, double toB) {
+    double deltaA = fromB - fromA;
+    double deltaB = toB - toA;
+
+    double scale = deltaB / deltaA;
+    double negA = -1 * fromA;
+    double offset = (negA * scale) + toA;
+    double finalNumber = (sourceNumber * scale) + offset;
+    return static_cast<int>(round(finalNumber));
+}
+
+void printDistanceBlock(uint16_t distance){
+	uint8_t colorValue = 0;
+
+	if(distance > 750 || distance < 500){
+		colorValue = 233;
+	} else {
+		colorValue = mapOneRangeToAnother(distance, 500, 750, 255, 233);
+	}
+
+	uart_puts("\033[38;5;");
+	uart_putn(colorValue);
+	uart_puts("m");
+	uart_puts("██");
+	uart_puts("\033[0m");
+}
+
+void readingDistanceTask(void* args){
+	uart_puts("VL53L0X init: ");
+	uart_putn(VL53L0X_init(&myTOFsensor));
+	uart_puts("\n\r");
+
+	VL53L0X_setMeasurementTimingBudget(&myTOFsensor, 30000);
+	VL53L0X_startContinuous(&myTOFsensor, 0);
+
+	uint16_t distance = 0;
+	
+	for(;;){
+		if(xSemaphoreTake(readDistanceSignal, portMAX_DELAY) == pdTRUE){
+			gpio_set(IND_PORT, ROTATION_SENSOR_TASK_IND);
+			distance = (uint16_t) VL53L0X_readRangeContinuousMillimeters(&myTOFsensor);
+			currentDistance = distance;
+
+			gpio_clear(IND_PORT, ROTATION_SENSOR_TASK_IND);
+		} else {
+			taskYIELD();
+		}
+	}	
+}
+
 // TODO: Why it doesn't work with uint8_t? 
 void decimalToBinary(int decimal, int* binaryArr) {
 	int bitCount = 0;
@@ -224,35 +280,12 @@ void stepperMotorTask(void* args){
 	for(;;){
 		if(xQueueReceive(movementQueue, &receivedPoint, portMAX_DELAY) == pdPASS){
 			gpio_set(IND_PORT, STEPPER_MOTOR_TASK_IND);
-			uart_puts("New position request: [");
-			uart_putn(receivedPoint.alphaDegrees);
-			uart_puts(", ");
-			uart_putn(receivedPoint.betaDegrees);
-			uart_puts("]\n\r");
-
-			uart_puts("Current position: [");
-			uart_putn(currentPosition.alphaDegrees);
-			uart_puts(", ");
-			uart_putn(currentPosition.betaDegrees);
-			uart_puts("]\n\r");
 
 			int alphaDiff = getDegreeDiff(currentPosition.alphaDegrees, receivedPoint.alphaDegrees);
 			int betaDiff = getDegreeDiff(currentPosition.betaDegrees, receivedPoint.betaDegrees);
 
 			int alphaStepsToMove = int(alphaDiff / (1.8  * GEAR_RATIO * (1.0/MICRO_STEPPING)));
 			int betaStepsToMove = int(betaDiff / (1.8  * GEAR_RATIO * (1.0/MICRO_STEPPING)));
-
-			uart_puts("Degrees to move: [");
-			uart_putn(alphaDiff);
-			uart_puts(", ");
-			uart_putn(betaDiff);
-			uart_puts("]\n\r");
-
-			uart_puts("Steps to move: [");
-			uart_putn(alphaStepsToMove);
-			uart_puts(", ");
-			uart_putn(betaStepsToMove);
-			uart_puts("]\n\r");
 
 			if(alphaStepsToMove > 0){
 				gpio_set(motorAlpha->dir.gpioport, motorAlpha->dir.gpios);
@@ -287,46 +320,6 @@ enum MainState {
 	BUTTON_WAIT,
 	MAIN_MOVEMENT
 };
-
-
-bool generatePoint(int counter, Point& point){
-	int n = 6;
-	int squareSize = 60; // in degrees for whole movement
-
-	if(counter > n * n) return false;
-
-	int col = counter % n;
-	int row = counter / n;
-	int x = squareSize / n;
-
-	uart_puts("Point: [");
-	uart_putn(col);
-	uart_puts(", ");
-	uart_putn(row);
-	uart_puts("]\n\r");
-
-	if(col == 0 && row == 0){
-		point.alphaDegrees += -x * n/2;
-		point.betaDegrees += x * n/2;
-		return true;
-	}
-
-	if(counter == n * n){
-		point.alphaDegrees += -x * (n/2-1);
-		point.betaDegrees += x * n/2;
-		return true;
-	}
-
-	if(col == 0){
-		point.alphaDegrees += -x * (n-1);
-		point.betaDegrees += -x;
-		return true;
-	}
-
-	point.alphaDegrees += x;
-
-	return true;
-}
 
 void mainTask(void* args){
 	MainState state = INITIAL_MOVEMENT;
@@ -392,10 +385,21 @@ void mainTask(void* args){
 				state = MAIN_MOVEMENT;
 			break;
 			case MAIN_MOVEMENT:
+				xSemaphoreGive(readAlphaPositionSignal);
+				xSemaphoreGive(readBetaPositionSignal);
+
 				point.alphaDegrees = currentPosition.alphaDegrees;
 				point.betaDegrees = currentPosition.betaDegrees;
-				if(generatePoint(counter++, point)){
+				auto[status, newRow] = generatePoint(counter++, point, 90, 60, 5);
+				if(newRow){
+					uart_puts("\n\r");
+				}
+
+				if(status){
 					xQueueSendToBack(movementQueue, &point, portMAX_DELAY);
+					xSemaphoreGive(readDistanceSignal);
+
+					printDistanceBlock(currentDistance);
 				} else {
 					counter = 0;
 					state = BUTTON_WAIT;
@@ -476,7 +480,7 @@ int main(void) {
 	/* Setup timer */
 	rcc_enable_rtc_clock();
 	rtc_awake_from_off(RCC_HSE); 
-	rtc_set_prescale_val(100); // 625
+	rtc_set_prescale_val(400); // 625
 	nvic_enable_irq(NVIC_RTC_IRQ);
 	rtc_clear_flag(RTC_SEC);
 	rtc_interrupt_enable(RTC_SEC);
@@ -492,6 +496,7 @@ int main(void) {
 	readBetaPositionSignal = xSemaphoreCreateBinary();
 	readAlphaSensorStatusSignal = xSemaphoreCreateBinary();
 	readBetaSensorStatusSignal = xSemaphoreCreateBinary();
+	readDistanceSignal = xSemaphoreCreateBinary();
 
 	alphaReadingTaskData = {
 		.i2c = I2C1,
@@ -522,9 +527,9 @@ int main(void) {
 		.motorBeta = &motorBeta
 	};
 
-	uart_puts("Start...\n\r");
-	xTaskCreate(mainTask, "MAIN", 100, NULL, 1, NULL);
-	xTaskCreate(uartTask, "UART", 100, NULL, 2, NULL);
+	uart_puts("\u001b[31mStart...\n\r\u001b[0m");
+
+	xTaskCreate(uart_task, "UART", 100, NULL, 2, NULL);
 	xTaskCreate(stepperMotorTask, "SM1", 100, (void*) &stepperMotorTaskData, 3, NULL);
 
 	// reading position and status needs to have higher priority than stepper motor to pre-emtive it
@@ -532,6 +537,9 @@ int main(void) {
 	xTaskCreate(readingRotationTask, "READING_BETA_POS", 100, (void*) &betaReadingTaskData, 4, NULL);
 	xTaskCreate(readingSensorStatusTask, "READING_ALPHA_STATUS", 100, (void*) &alphaReadingStatusTaskData, 4, NULL);
 	xTaskCreate(readingSensorStatusTask, "READING_BETA_STATUS", 100, (void*) &betaReadingStatusTaskData, 4, NULL);
+	xTaskCreate(readingDistanceTask, "READING_DISTANCE", 100, NULL, 4, NULL);
+
+	xTaskCreate(mainTask, "MAIN", 100, NULL, 1, NULL);
 
 	vTaskStartScheduler();
 	for (;;);

@@ -37,7 +37,7 @@ static void uart_setup(void) {
 	uart_txq = xQueueCreate(256,sizeof(char));
 }
 
-static void uartTask(void *args __attribute__((unused))) {
+static void uart_task(void *args __attribute__((unused))) {
 	char ch;
 
 	for (;;) {
